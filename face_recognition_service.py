@@ -8,6 +8,10 @@ import os
 from threading import Lock
 import pyttsx3
 from flask_cors import CORS
+import multiprocessing
+from gtts import gTTS
+import os
+
 
 # Initialize text-to-speech engine
 engine = pyttsx3.init()
@@ -97,9 +101,9 @@ def generate_announcement(detections):
             names.append("an unknown person")
     
     if len(names) == 1:
-        return f"Detected {names[0]}"
+        return f"The User {names[0]} has been detected."
     else:
-        return f"Detected {', '.join(names[:-1])} and {names[-1]}"
+        return f"The User {', '.join(names[:-1])} and {names[-1]} has been detected"
 
 @app.route('/users', methods=['GET', 'POST', 'DELETE'])
 def manage_users():
@@ -160,13 +164,15 @@ def manage_users():
 
 @app.route('/start', methods=['POST'])
 def start_camera():
+    #threading.Thread(target=speak, args=( "Project Management Camerad Started for the face detection face",)).start()
+    speak("Project Management Camerad Started for the face detection")
+
     global camera_running, camera_thread
     
     if not camera_running:
         camera_running = True
         camera_thread = threading.Thread(target=camera_loop)
         camera_thread.start()
-        threading.Thread(target=speak, args=("Camera started",)).start()
 
         return jsonify({"status": "Camera started"})
     else:
@@ -180,16 +186,33 @@ def get_detections():
     # Announce detections in a separate thread
     announcement = generate_announcement(current_detections)
     if announcement:
-        threading.Thread(target=speak, args=(announcement,)).start()
-        
+        #threading.Thread(target=speak, args=(announcement,)).start()
+        speak(announcement)
+
     return jsonify({
         "faces": current_detections,
         "face_count": len(current_detections),
         "announcement": announcement
     })
 
+
+
+
+def speak(text):
+    """Function to speak using gTTS"""
+    try:
+        print(f"[DEBUG] Speaking: {text}")
+        tts = gTTS(text=text, lang='en')
+        tts.save("output.mp3")
+        os.system("start output.mp3")  # Windows: `start`, Linux/macOS: `mpg321 output.mp3`
+        print("[DEBUG] Finished speaking")
+    except Exception as e:
+        print(f"[ERROR] Speech synthesis failed: {e}")
+
 @app.route('/stop', methods=['POST'])
 def stop_camera():
+    speak("Camera stopped")
+
     global camera_running
     
     camera_running = False
