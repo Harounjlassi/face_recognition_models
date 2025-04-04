@@ -1,9 +1,10 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 import re
 import mysql.connector
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
 
@@ -11,6 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
+CORS(app)  
 
 # Database configuration
 db_config = {
@@ -100,10 +102,10 @@ def insert_tasks_to_db(project_id, assignee_id, tasks):
             """
             
             cursor.execute(insert_query, (
-                None,                      # completed_date
+                (datetime.now() + timedelta(days=14)).strftime('%Y-%m-%d'),  # completed_date
                 current_time,             # date_created
                 task,                     # description
-                None,                      # due_date
+                (datetime.now() + timedelta(days=14)).strftime('%Y-%m-%d'),                      # due_date
                 "Generated Task",          # label
                 current_time,             # last_updated
                 "Medium",                 # priorite
@@ -158,4 +160,4 @@ def handle_request():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5200)

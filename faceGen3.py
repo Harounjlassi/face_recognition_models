@@ -1,10 +1,56 @@
+from flask import Flask, request, jsonify
+import threading
 import cv2
 import os
 import face_recognition
+from flask_cors import CORS
 import numpy as np
 import mysql.connector
 from datetime import datetime
-import threading
+from gtts import gTTS
+import os
+
+import pyttsx3
+
+
+app = Flask(__name__)
+CORS(app)  
+
+engine = pyttsx3.init()
+engine.setProperty('rate', 150)  # Speaking speed
+
+def speak(text):
+    """Function to speak text using gTTS (Google Text-to-Speech)
+    
+    Args:
+        text (str): The text to be spoken
+        
+    Returns:
+        bool: True if successful, False if failed
+    """
+    try:
+        print(f"[INFO] Speaking: '{text}'")
+        
+        # Create speech audio
+        tts = gTTS(text=text, lang='en', slow=False)
+        
+        # Save to temporary file
+        temp_file = "temp_speech.mp3"
+        tts.save(temp_file)
+        
+        # Play the audio
+        if os.name == 'nt':  # Windows
+            os.system(f"start {temp_file}")
+        else:  # macOS/Linux
+            os.system(f"mpg321 {temp_file}")
+            
+        print("[INFO] Speech completed successfully")
+        return True
+        
+    except Exception as e:
+        print(f"[ERROR] Speech synthesis failed: {str(e)}")
+        return False
+
 
 class PriorityFaceDetector:
     def __init__(self, db_config, images_path):
@@ -14,11 +60,13 @@ class PriorityFaceDetector:
         self.known_face_info = []
         self.priority_colors = {
             'HIGH': (0, 0, 255),    # Red
-            'MEDIUM': (0, 165, 255),# Orange
-            'LOW': (0, 255, 0),     # Green
+            'MEDIUM': (0, 165, 255), # Orange
+            'LOW': (0, 255, 0),      # Green
             'DEFAULT': (255, 255, 255) # White
         }
         self.lock = threading.Lock()
+        self.running = False  # Flag to control the detection loop
+        self.cap = None       # Video capture object
         
         # Initialize database connection and load encodings
         self.db_connection = mysql.connector.connect(**self.db_config)
@@ -174,15 +222,19 @@ class PriorityFaceDetector:
             font = cv2.FONT_HERSHEY_DUPLEX
             cv2.putText(frame, f"{info['name']} : {info['priority']} priority tasks)", 
                     (left + 6, bottom - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+            pr= info['priority']
+            nm= info['name']
+            speak("Hello "+nm+"you have "+ pr+" priority tasks")
         
         return frame
 
     def run(self):
         """Main loop for real-time processing"""
-        cap = cv2.VideoCapture(0)
+        self.running = True
+        self.cap = cv2.VideoCapture(0)
         
-        while True:
-            ret, frame = cap.read()
+        while self.running:
+            ret, frame = self.cap.read()
             if not ret:
                 break
                 
@@ -192,18 +244,37 @@ class PriorityFaceDetector:
             # Display
             cv2.imshow('Priority Face Detection', frame)
             
-            # Exit on 'q' key
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            # Exit on 'q' key or if not running
+            if cv2.waitKey(1) & 0xFF == ord('q') or not self.running:
                 break
                 
-        cap.release()
+        self.cleanup()
+
+    def stop(self):
+        """Stop the detection loop"""
+        self.running = False
+        # Wait a moment for the loop to exit
+        threading.Thread(target=self._wait_and_cleanup).start()
+
+    def _wait_and_cleanup(self):
+        """Helper method to wait briefly and ensure cleanup"""
+        import time
+        time.sleep(0.5)  # Wait for loop to exit
+        self.cleanup()
+
+    def cleanup(self):
+        """Release resources"""
+        if self.cap and self.cap.isOpened():
+            self.cap.release()
         cv2.destroyAllWindows()
+        self.running = False
 
     def __del__(self):
+        self.cleanup()
         if hasattr(self, 'db_connection') and self.db_connection.is_connected():
             self.db_connection.close()
 
-# Configuration
+# Config
 db_config = {
     'host': 'localhost',
     'user': 'root',
@@ -211,6 +282,38 @@ db_config = {
     'database': 'club-sync'
 }
 
-# Run the detector
+# Global detector instance
 detector = PriorityFaceDetector(db_config, images_path="images/")
-detector.run()
+
+# Function to run detection in a thread
+def run_detector():
+    detector.run()
+
+@app.route('/start-detection', methods=['POST'])
+def start_detection():
+    # Start the detector in a separate thread if not already running
+    if not detector.running:
+        thread = threading.Thread(target=run_detector)
+        thread.daemon = True
+        thread.start()
+        return jsonify({'message': 'Face detection started'}), 200
+    else:
+        return jsonify({'message': 'Detection is already running'}), 200
+
+@app.route('/stop-detection', methods=['POST'])
+def stop_detection():
+    if detector.running:
+        detector.stop()
+        return jsonify({'message': 'Face detection stopping...'}), 200
+    else:
+        return jsonify({'message': 'No detection running to stop'}), 200
+
+@app.route('/status', methods=['GET'])
+def status():
+    return jsonify({
+        'running': detector.running,
+        'message': 'Detection is running' if detector.running else 'Detection is not running'
+    }), 200
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5100, debug=True)
