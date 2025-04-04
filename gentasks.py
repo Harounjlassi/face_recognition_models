@@ -108,7 +108,7 @@ def insert_tasks_to_db(project_id, assignee_id, tasks):
                 current_time,             # last_updated
                 "Medium",                 # priorite
                 0,                        # progress
-                "Not_Started",            # status
+                "todo",            # status
                 task[:50],                # titre (truncated to 50 chars)
                 assignee_id,
                 project_id
